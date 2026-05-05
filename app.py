@@ -109,7 +109,7 @@ with col_h:
             <h1 style='color:white; margin:0; font-size:1.5rem;'>
             ⚕ SihaIQ — Intelligence du Cycle de Revenus</h1>
             <p style='color:#A8DADC; margin:3px 0 0 0; font-size:0.85rem;'>
-            Plateforme IA • Prédiction Rejets CNOPS/CNSS/AMO</p>
+            Exploitez vos données pour votre futur.</p>
         </div>
     """, unsafe_allow_html=True)
 with col_logout:
