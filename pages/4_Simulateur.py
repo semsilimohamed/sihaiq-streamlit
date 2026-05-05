@@ -83,8 +83,7 @@ performance_fee = mad_recupere_mois * 0.04
 cout_total_mois = abonnement_mad + performance_fee
 roi_mois = mad_recupere_mois - cout_total_mois
 roi_annuel = roi_mois * 12
-payback_days = (abonnement_mad / mad_recupere_mois * 30) if mad_recupere_mois > 0 else 0
-
+payback_days = (cout_total_mois / mad_recupere_mois * 30) if mad_recupere_mois > 0 else 0
 st.markdown("### 📊 Résultats de la Simulation")
 
 c1, c2, c3, c4 = st.columns(4)
