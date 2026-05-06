@@ -169,22 +169,23 @@ df = load_data()
 # ─────────────────────────────────────────
 # TABS — ROLE-BASED ACCESS
 # ─────────────────────────────────────────
-tab1 = tab2 = tab3 = tab4 = tab5 = tab6 = None
-
+tab1 = tab2 = tab3 = tab4 = tab5 = tab6 = tab7 = None
 if role == "admin":
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🎯 Prédiction",
         "📊 Tableau de Bord",
         "🔬 Performance Modèle",
         "💰 Simulateur ROI",
         "📦 Scoring par Lot",
+        "📋 File de Travail",
         "📜 Journal d'Audit"
     ])
 
 elif role == "biller":
-    tab1, tab5 = st.tabs([
+    tab1, tab5, tab7 = st.tabs([
         "🎯 Prédiction",
-        "📦 Scoring par Lot"
+        "📦 Scoring par Lot",
+        "📋 File de Travail"
     ])
 
 elif role == "auditor":
@@ -767,7 +768,219 @@ if tab5 is not None:
 
             except Exception as e:
                 st.error(f"❌ Erreur: {str(e)}")
+# ─────────────────────────────────────────
+# TAB 7 — FILE DE TRAVAIL (WORKLIST)
+# ─────────────────────────────────────────
+if tab7 is not None:
+    with tab7:
+        st.markdown("### 📋 File de Travail — Dossiers Prioritaires")
+        st.markdown("Classement par valeur à risque = Montant × Probabilité de rejet")
 
+        # Load K-Means models
+        @st.cache_resource
+        def load_kmeans():
+            km = joblib.load("model/sihaiq_kmeans_model.pkl")
+            sc = joblib.load("model/sihaiq_scaler.pkl")
+            pm = joblib.load("model/sihaiq_priority_map.pkl")
+            return km, sc, pm
+
+        kmeans_model, scaler, priority_map = load_kmeans()
+
+        # Prepare data
+        drop_cols = ['claim_id', 'service_date', 'rejection_cause',
+                     'forclusion_risk', 'droits_verified', 'montant_reclame_mad', 'rejected']
+        df_score = df.drop(columns=drop_cols)
+        for col in ['payer', 'service_type', 'ngap_code']:
+            le = LabelEncoder()
+            df_score[col] = le.fit_transform(df_score[col])
+
+        X_all = df_score[feature_names]
+
+        # XGBoost scores
+        scores = model.predict_proba(X_all)[:, 1]
+
+        # Build augmented features
+        kmeans_input = pd.DataFrame({
+            'score_risque':            scores,
+            'montant_reclame_mad':     df['montant_reclame_mad'],
+            'days_since_service':      df['days_since_service'],
+            'immatriculation_valid':   df['immatriculation_valid'],
+            'ngap_coding_valid':       df['ngap_coding_valid'],
+            'docs_completeness_ratio': df['docs_completeness_ratio'],
+            'pec_obtained':            df['pec_obtained'],
+            'droits_active':           df['droits_active']
+        })
+
+        # Scale and predict clusters
+        X_scaled = scaler.transform(kmeans_input)
+        clusters = kmeans_model.predict(X_scaled)
+
+        # Priority labels
+        priority_labels = {
+            1: ("🔴 Priorité 1", "Risque critique — Corriger immédiatement"),
+            2: ("🟠 Priorité 2", "Risque élevé — Valeur importante"),
+            3: ("🟡 Priorité 3", "Risque modéré — Valeur élevée"),
+            4: ("🟡 Priorité 4", "Forclusion imminente — Agir avant 60 jours"),
+            5: ("🔵 Priorité 5", "Risque modéré — Standard"),
+            6: ("🟢 Priorité 6", "Faible risque — Soumettre"),
+            7: ("🟢 Priorité 7", "Très faible risque — Soumettre directement"),
+        }
+
+        # SHAP action mapping
+        shap_actions = {
+            'immatriculation_valid': "⛔ Vérifier immatriculation CNSS/CNOPS",
+            'ngap_coding_valid':     "⛔ Corriger codage NGAP",
+            'docs_completeness_ratio': "⛔ Compléter les documents manquants",
+            'pec_obtained':          "⛔ Obtenir PEC avant soumission",
+            'droits_active':         "⛔ Vérifier droits AMO actifs",
+            'cin_valid':             "⛔ Vérifier CIN patient",
+            'inpe_present':          "⛔ Ajouter INPE médecin",
+            'prescription_legible':  "⛔ Remplacer ordonnance illisible",
+            'days_since_service':    "⚠️ Délai critique — Soumettre avant forclusion",
+        }
+
+        # Get top SHAP action per claim
+        explainer_wl = shap.TreeExplainer(model)
+        shap_vals = explainer_wl.shap_values(X_all)
+        shap_df = pd.DataFrame(shap_vals, columns=feature_names)
+        top_feature = shap_df.idxmax(axis=1)
+        top_action = top_feature.map(
+            lambda f: shap_actions.get(f, "⚠️ Vérifier le dossier complet"))
+
+        # Build worklist
+        payer_labels = {0:'AMO', 1:'CNOPS', 2:'CNSS'}
+        service_labels = {0:'Biologie', 1:'Chirurgie', 2:'Consultation',
+                         3:'Hospitalisation', 4:'Imagerie', 5:'Urgences'}
+
+        worklist = pd.DataFrame({
+            'claim_id':         df['claim_id'],
+            'payer':            df_score['payer'].map(payer_labels),
+            'service_type':     df_score['service_type'].map(service_labels),
+            'montant_mad':      df['montant_reclame_mad'],
+            'score_risque_%':   (scores * 100).round(1),
+            'valeur_a_risque':  (scores * df['montant_reclame_mad']).round(0),
+            'cluster':          clusters,
+            'priorite':         [priority_map.get(c+1, c+1) for c in clusters],
+        })
+
+        worklist['priorite_label'] = worklist['priorite'].map(
+            lambda x: priority_labels.get(x, (f"Priorité {x}", ""))[0])
+        worklist['action_requise'] = top_action.values
+        worklist['days_since_service'] = df['days_since_service'].values
+
+        # Sort by priority then value at risk
+        worklist = worklist.sort_values(
+            ['priorite', 'valeur_a_risque'], ascending=[True, False])
+
+        # KPI summary
+        st.markdown("#### 📊 Résumé de la File")
+        k1, k2, k3, k4 = st.columns(4)
+
+        total_at_risk = worklist['valeur_a_risque'].sum()
+        critical = (worklist['priorite'] == 1).sum()
+        forclusion = (worklist['days_since_service'] > 55).sum()
+        avg_score = worklist['score_risque_%'].mean()
+
+        for col, val, label, color in zip(
+            [k1, k2, k3, k4],
+            [f"{total_at_risk:,.0f} MAD",
+             f"{critical}",
+             f"{forclusion}",
+             f"{avg_score:.1f}%"],
+            ["💰 Valeur Totale à Risque",
+             "🔴 Dossiers Critiques",
+             "⏰ Risque Forclusion",
+             "📊 Score Moyen"],
+            ["#E63946", "#1D3557", "#F4A261", "#457B9D"]
+        ):
+            with col:
+                st.markdown(f"""
+                    <div style='background:{color}; padding:20px; border-radius:12px;
+                    text-align:center; color:white;'>
+                        <div style='font-size:1.5rem; font-weight:900;'>{val}</div>
+                        <div style='font-size:0.8rem; margin-top:5px; opacity:0.9;'>{label}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Priority filter
+        st.markdown("#### 🔍 Filtrer par Priorité")
+        selected_priorities = st.multiselect(
+            "Sélectionner les priorités à afficher",
+            options=sorted(worklist['priorite_label'].unique()),
+            default=sorted(worklist['priorite_label'].unique())[:3]
+        )
+
+        filtered = worklist[worklist['priorite_label'].isin(selected_priorities)]
+
+        # Priority distribution chart
+        col_chart, col_table = st.columns([1, 2])
+
+        with col_chart:
+            priority_counts = worklist['priorite_label'].value_counts()
+            fig_pri = go.Figure(go.Bar(
+                x=priority_counts.values,
+                y=priority_counts.index,
+                orientation='h',
+                marker_color=['#E63946','#F4A261','#F4A261',
+                             '#4CAF50','#4CAF50','#457B9D','#2A9D8F'][:len(priority_counts)],
+            ))
+            fig_pri.update_layout(
+                xaxis=dict(title='Nombre de dossiers'),
+                plot_bgcolor='white',
+                height=300,
+                margin=dict(t=10, b=10, l=10, r=10)
+            )
+            st.plotly_chart(fig_pri, use_container_width=True)
+
+        with col_table:
+            st.markdown(f"**{len(filtered)} dossiers affichés**")
+            display_cols = [
+                'claim_id', 'payer', 'service_type',
+                'montant_mad', 'score_risque_%',
+                'valeur_a_risque', 'priorite_label', 'action_requise'
+            ]
+            st.dataframe(
+                filtered[display_cols].head(50),
+                use_container_width=True,
+                height=280,
+                column_config={
+                    'claim_id': 'ID Dossier',
+                    'payer': 'Payeur',
+                    'service_type': 'Service',
+                    'montant_mad': st.column_config.NumberColumn('Montant (MAD)', format="%.0f MAD"),
+                    'score_risque_%': st.column_config.NumberColumn('Score Risque', format="%.1f%%"),
+                    'valeur_a_risque': st.column_config.NumberColumn('Valeur à Risque', format="%.0f MAD"),
+                    'priorite_label': 'Priorité',
+                    'action_requise': 'Action Requise'
+                }
+            )
+
+        st.markdown("---")
+
+        # Full worklist export
+        out_buf = io.StringIO()
+        worklist.to_csv(out_buf, index=False)
+        st.download_button(
+            "📥 Exporter File de Travail Complète (CSV)",
+            data=out_buf.getvalue(),
+            file_name="sihaiq_worklist.csv",
+            mime="text/csv",
+            type="primary"
+        )
+
+        # Log to audit
+        if 'audit_log' not in st.session_state:
+            st.session_state.audit_log = []
+        st.session_state.audit_log.append({
+            "horodatage": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "user": st.session_state.username,
+            "role": role,
+            "action": "WORKLIST_VIEW",
+            "detail": f"File de travail consultée — {len(worklist)} dossiers"
+        })
+        
 # ─────────────────────────────────────────
 # TAB 6 — AUDIT LOG
 # ─────────────────────────────────────────
