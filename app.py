@@ -758,7 +758,11 @@ if tab5 is not None:
                 for col, mapping in binary_maps.items():
                     if col in df_scoring.columns:
                         df_scoring[col] = df_scoring[col].map(mapping).fillna(df_scoring[col])
-
+                # Colonnes manquantes → valeur par défaut 0
+                for col in feature_names:
+                    if col not in df_scoring.columns:
+                       df_scoring[col] = 0
+                
                 probs = model.predict_proba(df_scoring[feature_names])[:,1]
                 predictions = model.predict(df_scoring[feature_names])
 
