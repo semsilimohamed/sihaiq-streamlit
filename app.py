@@ -573,7 +573,7 @@ if tab3 is not None:
         st.plotly_chart(fig_shap, use_container_width=True)
 
 # ─────────────────────────────────────────
-# TAB 4 — SIMULATEUR ROI
+# TAB 4 — 📈 Impact Financier
 # ─────────────────────────────────────────
 if tab4 is not None:
     with tab4:
@@ -605,18 +605,18 @@ if tab4 is not None:
         mad_recupere_mois = rejets_evites * montant_moyen_mad * (taux_recuperation/100)
         performance_fee = mad_recupere_mois * 0.04
         cout_total_mois = abonnement_mad + performance_fee
-        roi_mois = mad_recupere_mois - cout_total_mois
-        roi_annuel = roi_mois * 12
+        Gain_mois = mad_recupere_mois - cout_total_mois
+        Gain_Net_Annuel = Gain_mois * 12
         payback_days = (cout_total_mois / mad_recupere_mois * 30) if mad_recupere_mois > 0 else 0
 
         st.markdown("---")
-        st.markdown("### 📊 Résultats")
+        st.markdown("## 📊 Résultats")
         k1,k2,k3,k4 = st.columns(4)
         for col, val, label, color in zip(
             [k1,k2,k3,k4],
             [f"{mad_perdu_mois:,.0f} MAD", f"{mad_recupere_mois:,.0f} MAD",
-             f"{roi_annuel:,.0f} MAD", f"{payback_days:.0f} jours"],
-            ["Pertes Actuelles/Mois","Récupération/Mois","ROI Net Annuel","Délai Rentabilisation"],
+             f"{Gain_Net_Annuel:,.0f} MAD", f"{payback_days:.0f} jours"],
+            ["Pertes Actuelles/Mois","Récupération/Mois","Gain Net Annuel","Délai Rentabilisation"],
             ["#E63946","#2A9D8F","#1D3557","#457B9D"]
         ):
             with col:
@@ -636,8 +636,8 @@ if tab4 is not None:
         fig_proj.add_trace(go.Scatter(name='Récupération Cumulée',
             x=mois, y=[mad_recupere_mois*i for i in range(1,13)],
             mode='lines+markers', line=dict(color='#2A9D8F', width=3)))
-        fig_proj.add_trace(go.Scatter(name='ROI Net Cumulé',
-            x=mois, y=[roi_mois*i for i in range(1,13)],
+        fig_proj.add_trace(go.Scatter(name='Gain Net Cumulé',
+            x=mois, y=[Gain_mois*i for i in range(1,13)],
             mode='lines+markers', line=dict(color='#1D3557', width=3, dash='dash')))
         fig_proj.update_layout(
             yaxis=dict(title='MAD'),
