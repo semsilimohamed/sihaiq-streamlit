@@ -175,7 +175,7 @@ if role == "admin":
         "🎯 Prédiction",
         "📊 Tableau de Bord",
         "🔬 Performance Modèle",
-        "💰 Simulateur ROI",
+        "📈 Impact Financier",
         "📦 Scoring par Lot",
         "📋 File de Travail",
         "🏥 Direction Financière",
