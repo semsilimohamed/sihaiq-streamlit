@@ -169,15 +169,16 @@ df = load_data()
 # ─────────────────────────────────────────
 # TABS — ROLE-BASED ACCESS
 # ─────────────────────────────────────────
-tab1 = tab2 = tab3 = tab4 = tab5 = tab6 = tab7 = None
+tab1 = tab2 = tab3 = tab4 = tab5 = tab7 = tab8 = tab6 = None
 if role == "admin":
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab7, tab8, tab6 = st.tabs([
         "🎯 Prédiction",
         "📊 Tableau de Bord",
         "🔬 Performance Modèle",
         "💰 Simulateur ROI",
         "📦 Scoring par Lot",
         "📋 File de Travail",
+        "🏥 Direction Financière",
         "📜 Journal d'Audit"
     ])
 
@@ -980,7 +981,283 @@ if tab7 is not None:
             "action": "WORKLIST_VIEW",
             "detail": f"File de travail consultée — {len(worklist)} dossiers"
         })
-        
+
+# ─────────────────────────────────────────
+# TAB 8 — DIRECTION FINANCIÈRE
+# ─────────────────────────────────────────
+if tab8 is not None:
+    with tab8:
+        st.markdown("""
+            <div style='background: linear-gradient(90deg, #1D3557 0%, #457B9D 100%);
+            padding: 15px 25px; border-radius: 10px; margin-bottom: 20px;'>
+                <h2 style='color:white; margin:0; font-size:1.3rem;'>
+                🏥 Tableau de Bord — Direction Financière</h2>
+                <p style='color:#A8DADC; margin:3px 0 0 0; font-size:0.85rem;'>
+                Indicateurs de performance du cycle de facturation AMO/CNOPS/CNSS</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # ── AXE 1: EXPOSITION FINANCIÈRE ──
+        st.markdown("### 💰 Axe 1 — Exposition Financière")
+
+        total_claims = len(df)
+        rejected_claims = df[df['rejected']==1]
+        accepted_claims = df[df['rejected']==0]
+
+        encours_total = rejected_claims['montant_reclame_mad'].sum()
+        encours_cnops = rejected_claims[rejected_claims['payer']=='CNOPS']['montant_reclame_mad'].sum()
+        encours_cnss = rejected_claims[rejected_claims['payer']=='CNSS']['montant_reclame_mad'].sum()
+        encours_amo = rejected_claims[rejected_claims['payer']=='AMO']['montant_reclame_mad'].sum()
+        montant_total = df['montant_reclame_mad'].sum()
+        taux_exposition = encours_total / montant_total * 100
+
+        k1, k2, k3, k4 = st.columns(4)
+        for col, val, label, color, sub in zip(
+            [k1, k2, k3, k4],
+            [f"{encours_total:,.0f} MAD",
+             f"{encours_cnops:,.0f} MAD",
+             f"{encours_cnss:,.0f} MAD",
+             f"{encours_amo:,.0f} MAD"],
+            ["Encours Total Non Remboursé",
+             "Encours CNOPS",
+             "Encours CNSS",
+             "Encours AMO"],
+            ["#E63946", "#1D3557", "#457B9D", "#2A9D8F"],
+            [f"{taux_exposition:.1f}% du volume total",
+             f"{len(rejected_claims[rejected_claims['payer']=='CNOPS'])} dossiers rejetés",
+             f"{len(rejected_claims[rejected_claims['payer']=='CNSS'])} dossiers rejetés",
+             f"{len(rejected_claims[rejected_claims['payer']=='AMO'])} dossiers rejetés"]
+        ):
+            with col:
+                st.markdown(f"""
+                    <div style='background:white; padding:20px; border-radius:10px;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.08);
+                    border-left:4px solid {color};'>
+                        <div style='font-size:1.4rem; font-weight:900; color:{color};'>{val}</div>
+                        <div style='color:#333; font-size:0.85rem; margin-top:5px; font-weight:600;'>{label}</div>
+                        <div style='color:#888; font-size:0.75rem; margin-top:3px;'>{sub}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Encours by payer pie
+        col_pie, col_bar = st.columns(2)
+
+        with col_pie:
+            st.markdown("#### Répartition de l'Encours par Organisme")
+            fig_pie = go.Figure(go.Pie(
+                labels=['CNOPS', 'CNSS', 'AMO'],
+                values=[encours_cnops, encours_cnss, encours_amo],
+                hole=0.5,
+                marker_colors=['#1D3557', '#457B9D', '#2A9D8F']
+            ))
+            fig_pie.update_layout(height=300, margin=dict(t=20,b=20))
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col_bar:
+            st.markdown("#### Montant Moyen par Dossier Rejeté (MAD)")
+            avg_by_service = rejected_claims.groupby('service_type')['montant_reclame_mad'].mean().reset_index()
+            avg_by_service.columns = ['Service', 'Montant Moyen']
+            avg_by_service = avg_by_service.sort_values('Montant Moyen', ascending=True)
+
+            fig_avg = go.Figure(go.Bar(
+                x=avg_by_service['Montant Moyen'],
+                y=avg_by_service['Service'],
+                orientation='h',
+                marker_color='#E63946',
+                text=avg_by_service['Montant Moyen'].round(0).astype(int).astype(str) + ' MAD',
+                textposition='outside'
+            ))
+            fig_avg.update_layout(
+                plot_bgcolor='white', height=300,
+                margin=dict(t=10,b=10,l=10,r=80))
+            st.plotly_chart(fig_avg, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── AXE 2: PERFORMANCE DE SOUMISSION ──
+        st.markdown("### 📋 Axe 2 — Performance de Soumission")
+
+        clean_claim_rate = accepted_claims.shape[0] / total_claims * 100
+        rejection_rate = rejected_claims.shape[0] / total_claims * 100
+        avg_delay = df['days_since_service'].mean()
+
+        k1, k2, k3, k4 = st.columns(4)
+        for col, val, label, color in zip(
+            [k1, k2, k3, k4],
+            [f"{clean_claim_rate:.1f}%",
+             f"{rejection_rate:.1f}%",
+             f"{avg_delay:.0f} jours",
+             f"{total_claims:,}"],
+            ["Taux Dossiers Propres (CCR)",
+             "Taux de Rejet Global",
+             "Délai Moyen de Soumission",
+             "Total Dossiers Traités"],
+            ["#2A9D8F", "#E63946", "#F4A261", "#1D3557"]
+        ):
+            with col:
+                st.markdown(f"""
+                    <div style='background:white; padding:20px; border-radius:10px;
+                    box-shadow:0 2px 8px rgba(0,0,0,0.08);
+                    border-left:4px solid {color}; text-align:center;'>
+                        <div style='font-size:1.8rem; font-weight:900; color:{color};'>{val}</div>
+                        <div style='color:#666; margin-top:5px; font-size:0.85rem;'>{label}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Rejection by cause + by service
+        col_cause, col_service = st.columns(2)
+
+        with col_cause:
+            st.markdown("#### Causes de Rejet — Impact Financier (MAD)")
+            cause_finance = rejected_claims.groupby('rejection_cause').agg(
+                montant=('montant_reclame_mad', 'sum'),
+                nb_dossiers=('montant_reclame_mad', 'count')
+            ).reset_index()
+            cause_finance.columns = ['Cause', 'Montant', 'Dossiers']
+            cause_finance['Cause'] = cause_finance['Cause'].str.replace('_', ' ')
+            cause_finance = cause_finance.sort_values('Montant', ascending=True)
+
+            fig_cause = go.Figure(go.Bar(
+                x=cause_finance['Montant'],
+                y=cause_finance['Cause'],
+                orientation='h',
+                marker_color='#1D3557',
+                text=cause_finance['Montant'].apply(lambda x: f"{x:,.0f} MAD"),
+                textposition='outside'
+            ))
+            fig_cause.update_layout(
+                plot_bgcolor='white', height=350,
+                margin=dict(t=10,b=10,l=10,r=100))
+            st.plotly_chart(fig_cause, use_container_width=True)
+
+        with col_service:
+            st.markdown("#### Taux de Rejet par Type de Prestation")
+            service_stats = df.groupby('service_type').agg(
+                total=('rejected', 'count'),
+                rejets=('rejected', 'sum'),
+                montant_at_risk=('montant_reclame_mad', lambda x: x[df.loc[x.index, 'rejected']==1].sum())
+            ).reset_index()
+            service_stats['taux_rejet'] = service_stats['rejets'] / service_stats['total'] * 100
+            service_stats = service_stats.sort_values('taux_rejet', ascending=True)
+
+            fig_svc = go.Figure(go.Bar(
+                x=service_stats['taux_rejet'],
+                y=service_stats['service_type'],
+                orientation='h',
+                marker_color=service_stats['taux_rejet'].apply(
+                    lambda x: '#E63946' if x>40 else '#F4A261' if x>30 else '#2A9D8F'),
+                text=service_stats['taux_rejet'].round(1).astype(str) + '%',
+                textposition='outside'
+            ))
+            fig_svc.update_layout(
+                xaxis=dict(title='Taux de Rejet (%)'),
+                plot_bgcolor='white', height=350,
+                margin=dict(t=10,b=10,l=10,r=60))
+            st.plotly_chart(fig_svc, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── AXE 3: ALERTES OPÉRATIONNELLES ──
+        st.markdown("### 🚨 Axe 3 — Alertes Opérationnelles")
+
+        forclusion_dossiers = df[df['days_since_service'] > 55]
+        forclusion_montant = forclusion_dossiers[
+            forclusion_dossiers['rejected']==1]['montant_reclame_mad'].sum()
+        forclusion_count = len(forclusion_dossiers[forclusion_dossiers['rejected']==1])
+
+        urgent_dossiers = df[(df['days_since_service'] > 45) &
+                            (df['days_since_service'] <= 55)]
+        urgent_montant = urgent_dossiers[
+            urgent_dossiers['rejected']==1]['montant_reclame_mad'].sum()
+
+        k1, k2, k3 = st.columns(3)
+
+        with k1:
+            st.markdown(f"""
+                <div style='background:#E63946; padding:20px; border-radius:10px;
+                color:white; text-align:center;'>
+                    <div style='font-size:2rem; font-weight:900;'>{forclusion_count}</div>
+                    <div style='font-weight:600; margin-top:5px;'>⛔ Dossiers en Forclusion</div>
+                    <div style='font-size:0.85rem; margin-top:5px; opacity:0.9;'>
+                    {forclusion_montant:,.0f} MAD — Irrécouvrables après 60 jours</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        with k2:
+            st.markdown(f"""
+                <div style='background:#F4A261; padding:20px; border-radius:10px;
+                color:white; text-align:center;'>
+                    <div style='font-size:2rem; font-weight:900;'>{len(urgent_dossiers[urgent_dossiers['rejected']==1])}</div>
+                    <div style='font-weight:600; margin-top:5px;'>⚠️ Dossiers Urgents (45-55j)</div>
+                    <div style='font-size:0.85rem; margin-top:5px; opacity:0.9;'>
+                    {urgent_montant:,.0f} MAD — Agir dans les 15 jours</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        with k3:
+            pec_missing = df[(df['pec_required']==1) & (df['pec_obtained']==0)]
+            pec_montant = pec_missing['montant_reclame_mad'].sum()
+            st.markdown(f"""
+                <div style='background:#1D3557; padding:20px; border-radius:10px;
+                color:white; text-align:center;'>
+                    <div style='font-size:2rem; font-weight:900;'>{len(pec_missing)}</div>
+                    <div style='font-weight:600; margin-top:5px;'>📋 PEC Manquante</div>
+                    <div style='font-size:0.85rem; margin-top:5px; opacity:0.9;'>
+                    {pec_montant:,.0f} MAD — Autorisation requise non obtenue</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Delay distribution
+        st.markdown("#### ⏰ Distribution des Délais de Soumission")
+        fig_delay = go.Figure()
+
+        fig_delay.add_trace(go.Histogram(
+            x=df[df['rejected']==0]['days_since_service'],
+            name='Dossiers Acceptés',
+            marker_color='#2A9D8F',
+            opacity=0.7,
+            nbinsx=30
+        ))
+        fig_delay.add_trace(go.Histogram(
+            x=df[df['rejected']==1]['days_since_service'],
+            name='Dossiers Rejetés',
+            marker_color='#E63946',
+            opacity=0.7,
+            nbinsx=30
+        ))
+        fig_delay.add_vline(x=55, line_dash="dash",
+            line_color="#1D3557", line_width=2,
+            annotation_text="Seuil Forclusion (55j)",
+            annotation_position="top right")
+        fig_delay.update_layout(
+            barmode='overlay',
+            xaxis=dict(title='Jours depuis Prestation'),
+            yaxis=dict(title='Nombre de Dossiers'),
+            legend=dict(orientation='h', y=-0.2),
+            plot_bgcolor='white',
+            height=350,
+            margin=dict(t=20,b=20)
+        )
+        st.plotly_chart(fig_delay, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("""
+            <div style='background:#e8f4f8; padding:15px; border-radius:8px;
+            border-left:4px solid #1D3557;'>
+                <strong>📌 Note Méthodologique</strong><br>
+                Les montants affichés sont calculés sur données synthétiques 
+                CNDP-conformes (3,000 dossiers BAF). Les indicateurs de délai 
+                de remboursement réel et de taux de récupération nécessitent 
+                l'intégration avec le système d'information hospitalier (SIH).
+            </div>
+        """, unsafe_allow_html=True)  
+
 # ─────────────────────────────────────────
 # TAB 6 — AUDIT LOG
 # ─────────────────────────────────────────
