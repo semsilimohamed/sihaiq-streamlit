@@ -176,7 +176,7 @@ if role == "admin":
         "📊 Tableau de Bord",
         "🔬 Performance Modèle",
         "📈 Impact Financier",
-        "📂 Analyse de Portefeuille",
+        "📦 Analyse de Portefeuille",
         "📋 File de Travail",
         "🏥 Direction Financière",
         "📜 Journal d'Audit"
@@ -185,7 +185,7 @@ if role == "admin":
 elif role == "biller":
     tab1, tab5, tab7 = st.tabs([
         "🎯 Prédiction",
-        "📦 Scoring par Lot",
+        "📦 Analyse de Portefeuille",
         "📋 File de Travail"
     ])
 
@@ -204,38 +204,62 @@ if tab1 is not None:
         st.markdown("### 📋 Saisie du Dossier BAF")
         col1, col2, col3 = st.columns(3)
 
+        # ── Mapping NGAP dynamique par type de prestation ──
+        NGAP_MAP = {
+            "Biologie":        {"B": 0},
+            "Chirurgie":       {"K": 6, "P": 7},
+            "Consultation":    {"C": 1, "C2": 2, "Cs": 3, "V": 8},
+            "Hospitalisation": {"K": 6, "HN": 5, "FORFAIT": 4},
+            "Imagerie":        {"Z": 9, "P": 7},
+            "Urgences":        {"C": 1, "K": 6, "FORFAIT": 4},
+        }
+        SERVICE_MAP = {
+            "Biologie": 0, "Chirurgie": 1, "Consultation": 2,
+            "Hospitalisation": 3, "Imagerie": 4, "Urgences": 5
+        }
+        PAYER_MAP  = {"AMO": 0, "CNOPS": 1, "CNSS": 2}
+
         with col1:
             st.markdown("**Informations Payeur**")
-            payer = st.selectbox("Organisme Payeur",
-                options=[0,1,2],
-                format_func=lambda x: {0:"AMO",1:"CNOPS",2:"CNSS"}[x])
-            service_type = st.selectbox("Type de Prestation",
-                options=[0,1,2,3,4,5],
-                format_func=lambda x: {0:"Biologie",1:"Chirurgie",2:"Consultation",
-                                        3:"Hospitalisation",4:"Imagerie",5:"Urgences"}[x])
-            ngap_code = st.selectbox("Code NGAP",
-                options=[0,1,2,3,4,5,6,7,8,9],
-                format_func=lambda x: {0:"B",1:"C",2:"C2",3:"Cs",4:"FORFAIT",
-                                        5:"HN",6:"K",7:"P",8:"V",9:"Z"}[x])
+            payer_label = st.selectbox("Organisme Payeur", options=["AMO", "CNOPS", "CNSS"])
+            payer = PAYER_MAP[payer_label]
+
+            service_label = st.selectbox("Type de Prestation", options=list(NGAP_MAP.keys()))
+            service_type = SERVICE_MAP[service_label]
+
+            ngap_options = list(NGAP_MAP[service_label].keys())
+            ngap_label = st.selectbox("Codage NGAP", options=ngap_options)
+            ngap_code = NGAP_MAP[service_label][ngap_label]
+
             num_acts = st.slider("Nombre d'Actes", 1, 20, 3)
             patient_age = st.slider("Âge du Patient", 0, 100, 35)
 
         with col2:
             st.markdown("**Statut Patient**")
-            is_ald = st.toggle("Affection Longue Durée (ALD)", value=False)
-            is_ayant_droit = st.toggle("Ayant Droit", value=False)
+            is_ald = st.selectbox("Affection Longue Durée (ALD)",
+                options=["Non", "Oui"]) == "Oui"
+            is_ayant_droit = st.selectbox("Ayant Droit",
+                options=["Non", "Oui"]) == "Oui"
             st.markdown("**Identito-Vigilance**")
-            inpe_present = st.toggle("INPE Présent", value=True)
-            immatriculation_valid = st.toggle("Immatriculation Valide", value=True)
-            cin_valid = st.toggle("CIN Valide", value=True)
+            inpe_present = st.selectbox("INPE Prescripteur",
+                options=["Présent", "Absent"]) == "Présent"
+            immatriculation_valid = st.selectbox("Immatriculation",
+                options=["Valide", "Invalide"]) == "Valide"
+            cin_valid = st.selectbox("CIN Patient",
+                options=["Valide", "Invalide"]) == "Valide"
 
         with col3:
             st.markdown("**Qualité du Dossier**")
-            ngap_coding_valid = st.toggle("Codage NGAP Valide", value=True)
-            prescription_legible = st.toggle("Ordonnance Lisible", value=True)
-            droits_active = st.toggle("Droits AMO Actifs", value=True)
-            pec_required = st.toggle("PEC Requise", value=False)
-            pec_obtained = st.toggle("PEC Obtenue", value=False)
+            ngap_coding_valid = st.selectbox("Codage NGAP",
+                options=["Valide", "Invalide"]) == "Valide"
+            prescription_legible = st.selectbox("Ordonnance",
+                options=["Lisible", "Illisible"]) == "Lisible"
+            droits_active = st.selectbox("Droits AMO",
+                options=["Actifs", "Inactifs"]) == "Actifs"
+            pec_required = st.selectbox("PEC Requise",
+                options=["Non", "Oui"]) == "Oui"
+            pec_obtained = st.selectbox("PEC Obtenue",
+                options=["Non", "Oui"]) == "Oui"
             docs_completeness_ratio = st.slider("Ratio Complétude Dossier", 0.0, 1.0, 0.85)
             days_since_service = st.slider("Jours depuis Prestation", 0, 90, 15)
 
@@ -573,7 +597,7 @@ if tab3 is not None:
         st.plotly_chart(fig_shap, use_container_width=True)
 
 # ─────────────────────────────────────────
-# TAB 4 — 📈 Impact Financier
+# TAB 4 — SIMULATEUR ROI
 # ─────────────────────────────────────────
 if tab4 is not None:
     with tab4:
@@ -605,18 +629,18 @@ if tab4 is not None:
         mad_recupere_mois = rejets_evites * montant_moyen_mad * (taux_recuperation/100)
         performance_fee = mad_recupere_mois * 0.04
         cout_total_mois = abonnement_mad + performance_fee
-        Gain_mois = mad_recupere_mois - cout_total_mois
-        Gain_Net_Annuel = Gain_mois * 12
+        roi_mois = mad_recupere_mois - cout_total_mois
+        roi_annuel = roi_mois * 12
         payback_days = (cout_total_mois / mad_recupere_mois * 30) if mad_recupere_mois > 0 else 0
 
         st.markdown("---")
-        st.markdown("## 📊 Résultats")
+        st.markdown("### 📊 Résultats")
         k1,k2,k3,k4 = st.columns(4)
         for col, val, label, color in zip(
             [k1,k2,k3,k4],
             [f"{mad_perdu_mois:,.0f} MAD", f"{mad_recupere_mois:,.0f} MAD",
-             f"{Gain_Net_Annuel:,.0f} MAD", f"{payback_days:.0f} jours"],
-            ["Pertes Actuelles/Mois","Récupération/Mois","Gain Net Annuel","Délai Rentabilisation"],
+             f"{roi_annuel:,.0f} MAD", f"{payback_days:.0f} jours"],
+            ["Pertes Actuelles/Mois","Récupération/Mois","ROI Net Annuel","Délai Rentabilisation"],
             ["#E63946","#2A9D8F","#1D3557","#457B9D"]
         ):
             with col:
@@ -636,8 +660,8 @@ if tab4 is not None:
         fig_proj.add_trace(go.Scatter(name='Récupération Cumulée',
             x=mois, y=[mad_recupere_mois*i for i in range(1,13)],
             mode='lines+markers', line=dict(color='#2A9D8F', width=3)))
-        fig_proj.add_trace(go.Scatter(name='Gain Net Cumulé',
-            x=mois, y=[Gain_mois*i for i in range(1,13)],
+        fig_proj.add_trace(go.Scatter(name='ROI Net Cumulé',
+            x=mois, y=[roi_mois*i for i in range(1,13)],
             mode='lines+markers', line=dict(color='#1D3557', width=3, dash='dash')))
         fig_proj.update_layout(
             yaxis=dict(title='MAD'),
@@ -650,20 +674,29 @@ if tab4 is not None:
 # ─────────────────────────────────────────
 if tab5 is not None:
     with tab5:
-        st.markdown("### 📂 Analyse de Portefeuille — Analyse BAF en Masse")
+        st.markdown("### 📦 Analyse de Portefeuille — Analyse BAF en Masse")
 
         with st.expander("📋 Format requis du fichier CSV"):
             st.markdown("""
-            | Colonne | Valeurs |
+            | Colonne | Valeurs acceptées |
             |---|---|
             | `payer` | AMO, CNOPS, CNSS |
             | `service_type` | Biologie, Chirurgie, Consultation, Hospitalisation, Imagerie, Urgences |
-            | `ngap_code` | B, C, C2, Cs, FORFAIT, HN, K, P, V, Z |
-            | `num_acts` | Entier |
+            | `ngap_code` | B, C, C2, Cs, FORFAIT, HN, K, P, V, Z *(cohérent avec service_type)* |
+            | `num_acts` | Entier (ex: 1, 3, 5) |
             | `patient_age` | 0–100 |
-            | Colonnes binaires | 0 ou 1 |
+            | `is_ald` | Oui / Non |
+            | `is_ayant_droit` | Oui / Non |
+            | `inpe_present` | Présent / Absent |
+            | `immatriculation_valid` | Valide / Invalide |
+            | `cin_valid` | Valide / Invalide |
+            | `ngap_coding_valid` | Valide / Invalide |
+            | `prescription_legible` | Lisible / Illisible |
+            | `droits_active` | Actifs / Inactifs |
+            | `pec_required` | Oui / Non |
+            | `pec_obtained` | Oui / Non |
             | `docs_completeness_ratio` | 0.0–1.0 |
-            | `days_since_service` | Entier |
+            | `days_since_service` | Entier (jours) |
             """)
 
         sample_data = {
@@ -674,18 +707,18 @@ if tab5 is not None:
             'ngap_code':['C','K','B','K','Z','C','Cs','B','K','Z'],
             'num_acts':[2,5,3,8,1,2,3,4,6,2],
             'patient_age':[45,62,28,71,35,19,55,40,67,30],
-            'is_ald':[0,1,0,1,0,0,1,0,1,0],
-            'is_ayant_droit':[0,0,1,0,0,1,0,0,0,1],
-            'inpe_present':[1,1,0,1,1,1,0,1,1,1],
-            'immatriculation_valid':[1,0,1,1,0,1,1,1,0,1],
-            'cin_valid':[1,1,0,1,1,0,1,1,1,0],
-            'ngap_coding_valid':[1,0,1,0,1,1,0,1,0,1],
-            'prescription_legible':[1,1,1,0,1,1,1,0,1,1],
-            'droits_active':[1,1,1,0,0,1,1,1,0,1],
+            'is_ald':['Non','Oui','Non','Oui','Non','Non','Oui','Non','Oui','Non'],
+            'is_ayant_droit':['Non','Non','Oui','Non','Non','Oui','Non','Non','Non','Oui'],
+            'inpe_present':['Présent','Présent','Absent','Présent','Présent','Présent','Absent','Présent','Présent','Présent'],
+            'immatriculation_valid':['Valide','Invalide','Valide','Valide','Invalide','Valide','Valide','Valide','Invalide','Valide'],
+            'cin_valid':['Valide','Valide','Invalide','Valide','Valide','Invalide','Valide','Valide','Valide','Invalide'],
+            'ngap_coding_valid':['Valide','Invalide','Valide','Invalide','Valide','Valide','Invalide','Valide','Invalide','Valide'],
+            'prescription_legible':['Lisible','Lisible','Lisible','Illisible','Lisible','Lisible','Lisible','Illisible','Lisible','Lisible'],
+            'droits_active':['Actifs','Actifs','Actifs','Inactifs','Inactifs','Actifs','Actifs','Actifs','Inactifs','Actifs'],
             'docs_completeness_ratio':[0.95,0.60,0.85,0.40,0.70,0.90,0.55,0.88,0.45,0.92],
             'days_since_service':[5,45,12,60,30,3,55,20,48,8],
-            'pec_required':[0,1,0,1,0,0,1,0,1,0],
-            'pec_obtained':[0,0,0,1,0,0,0,0,0,0],
+            'pec_required':['Non','Oui','Non','Oui','Non','Non','Oui','Non','Oui','Non'],
+            'pec_obtained':['Non','Non','Non','Oui','Non','Non','Non','Non','Non','Non'],
         }
         sample_df = pd.DataFrame(sample_data)
         csv_buf = io.StringIO()
@@ -706,9 +739,25 @@ if tab5 is not None:
                               'Hospitalisation':3,'Imagerie':4,'Urgences':5}
                 ngap_map = {'B':0,'C':1,'C2':2,'Cs':3,'FORFAIT':4,
                            'HN':5,'K':6,'P':7,'V':8,'Z':9}
-                df_scoring['payer'] = df_scoring['payer'].map(payer_map)
+                # Label → 0/1 conversions
+                binary_maps = {
+                    'is_ald':               {'Non':0,'Oui':1},
+                    'is_ayant_droit':       {'Non':0,'Oui':1},
+                    'inpe_present':         {'Absent':0,'Présent':1},
+                    'immatriculation_valid':{'Invalide':0,'Valide':1},
+                    'cin_valid':            {'Invalide':0,'Valide':1},
+                    'ngap_coding_valid':    {'Invalide':0,'Valide':1},
+                    'prescription_legible': {'Illisible':0,'Lisible':1},
+                    'droits_active':        {'Inactifs':0,'Actifs':1},
+                    'pec_required':         {'Non':0,'Oui':1},
+                    'pec_obtained':         {'Non':0,'Oui':1},
+                }
+                df_scoring['payer']        = df_scoring['payer'].map(payer_map)
                 df_scoring['service_type'] = df_scoring['service_type'].map(service_map)
-                df_scoring['ngap_code'] = df_scoring['ngap_code'].map(ngap_map)
+                df_scoring['ngap_code']    = df_scoring['ngap_code'].map(ngap_map)
+                for col, mapping in binary_maps.items():
+                    if col in df_scoring.columns:
+                        df_scoring[col] = df_scoring[col].map(mapping).fillna(df_scoring[col])
 
                 probs = model.predict_proba(df_scoring[feature_names])[:,1]
                 predictions = model.predict(df_scoring[feature_names])
@@ -1338,4 +1387,4 @@ st.markdown("""
 <div style='text-align:center; color:#888; font-size:0.8rem;'>
     SihaIQ v1.0 • Données synthétiques CNDP-conformes • CM6RI Lab d'Innovation 2026
 </div>
-""", unsafe_allow_html=True) 
+""", unsafe_allow_html=True)
