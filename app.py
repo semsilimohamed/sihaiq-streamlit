@@ -176,7 +176,7 @@ if role == "admin":
         "📊 Tableau de Bord",
         "🔬 Performance Modèle",
         "📈 Impact Financier",
-        "📦 Scoring par Lot",
+        "📂 Analyse de Portefeuille",
         "📋 File de Travail",
         "🏥 Direction Financière",
         "📜 Journal d'Audit"
@@ -650,7 +650,7 @@ if tab4 is not None:
 # ─────────────────────────────────────────
 if tab5 is not None:
     with tab5:
-        st.markdown("### 📤 Scoring par Lot — Analyse BAF en Masse")
+        st.markdown("### 📂 Analyse de Portefeuille — Analyse BAF en Masse")
 
         with st.expander("📋 Format requis du fichier CSV"):
             st.markdown("""
