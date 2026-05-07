@@ -762,7 +762,7 @@ if tab5 is not None:
                 for col in feature_names:
                     if col not in df_scoring.columns:
                        df_scoring[col] = 0
-                
+                df_scoring[feature_names] = df_scoring[feature_names].apply(pd.to_numeric, errors='coerce').fillna(0).astype(float)
                 probs = model.predict_proba(df_scoring[feature_names])[:,1]
                 predictions = model.predict(df_scoring[feature_names])
 
