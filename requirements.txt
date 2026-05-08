@@ -1,13 +1,10 @@
-echo. > requirements.txt
-(
-echo streamlit>=1.37.1
-echo xgboost>=2.0.3
-echo shap>=0.45.0
-echo pandas>=2.2.0
-echo numpy>=1.26.4
-echo matplotlib>=3.8.2
-echo scikit-learn>=1.4.0
-echo plotly>=5.18.0
-echo joblib>=1.3.2
-echo bcrypt>=4.0.0
-) > requirements.txt
+streamlit>=1.37.1
+xgboost>=2.0.3
+shap>=0.45.0
+pandas>=2.2.0
+numpy>=1.26.4
+matplotlib>=3.8.2
+scikit-learn>=1.4.0
+plotly>=5.18.0
+joblib>=1.3.2
+bcrypt>=4.0.0
