@@ -3,6 +3,9 @@ import joblib
 import pandas as pd
 import numpy as np
 import matplotlib
+import bcrypt
+import sqlite3
+import os
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
@@ -19,6 +22,60 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# ─────────────────────────────────────────
+# USERS — bcrypt hashed passwords
+# ─────────────────────────────────────────
+USERS = {
+    "admin":   {"password_hash": b"$2b$12$FWnebl9cgc7/zYZwAxI/hO/q57cGQqOWgYB0ypcdfDoOibXNTcYFi", "role": "admin",   "nom": "Administrateur"},
+    "biller":  {"password_hash": b"$2b$12$aRhAYuprstgoo5rFuV/st.gELwGCkIbGV7/8ozRvVjhVec8TWu0Gu", "role": "biller",  "nom": "Agent BAF"},
+    "auditor": {"password_hash": b"$2b$12$YeV5ONUuAG2QRRJyYUlhn.tK7lOWsZMvnoerqy3xkOQvxIkGiDED6", "role": "auditor", "nom": "Auditeur"},
+    "demo":    {"password_hash": b"$2b$12$fU8bCjHEyFVBuCU6QWYsnOeaxMknEdXK1m7StSYsw59AA1nrkpYg.", "role": "admin",   "nom": "Démo CM6RI"},
+    "jury":    {"password_hash": b"$2b$12$QitymgqwTm96Nc8677LY/.575gXwfd/J1YuRr4gEc8qpI2PYiWySq", "role": "admin",   "nom": "Jury CM6RI"},
+}
+
+# ─────────────────────────────────────────
+# AUDIT LOG — SQLite persistent
+# ─────────────────────────────────────────
+AUDIT_DB = "audit_log.db"
+
+def init_audit_db():
+    conn = sqlite3.connect(AUDIT_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            horodatage TEXT,
+            user TEXT,
+            role TEXT,
+            action TEXT,
+            detail TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def log_audit(user, role, action, detail):
+    try:
+        init_audit_db()
+        conn = sqlite3.connect(AUDIT_DB)
+        conn.execute(
+            "INSERT INTO audit_log (horodatage, user, role, action, detail) VALUES (?,?,?,?,?)",
+            (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user, role, action, detail)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # never crash the app due to audit failure
+
+def get_audit_log():
+    try:
+        init_audit_db()
+        conn = sqlite3.connect(AUDIT_DB)
+        df_audit = pd.read_sql("SELECT horodatage, user, role, action, detail FROM audit_log ORDER BY horodatage DESC", conn)
+        conn.close()
+        return df_audit
+    except Exception:
+        return pd.DataFrame(columns=["horodatage","user","role","action","detail"])
 
 st.markdown("""
     <style>
@@ -82,23 +139,19 @@ if not st.session_state.authenticated:
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 🔐 Connexion")
-        username = st.text_input("Identifiant", placeholder="Entrez votre identifiant")
-        password = st.text_input("Mot de passe", type="password",
-                                  placeholder="Entrez votre mot de passe")
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Se connecter", type="primary", use_container_width=True):
-            USERS = {
-                "admin":   {"password": "sihaiq2026",     "role": "admin",   "nom": "Administrateur"},
-                "biller":  {"password": "biller2026",     "role": "biller",  "nom": "Agent BAF"},
-                "auditor": {"password": "auditor2026",    "role": "auditor", "nom": "Auditeur"},
-                "demo":    {"password": "cm6ri2026",      "role": "admin",   "nom": "Démo CM6RI"},
-                "jury":    {"password": "innovation2026", "role": "admin",   "nom": "Jury CM6RI"},
-            }
-            if username in USERS and password == USERS[username]["password"]:
+        with st.form("login_form"):
+            username = st.text_input("Identifiant", placeholder="Entrez votre identifiant")
+            password = st.text_input("Mot de passe", type="password",
+                                      placeholder="Entrez votre mot de passe")
+            st.markdown("<br>", unsafe_allow_html=True)
+            submitted = st.form_submit_button("Se connecter", type="primary", use_container_width=True)
+        if submitted:
+            if username in USERS and bcrypt.checkpw(password.encode(), USERS[username]["password_hash"]):
                 st.session_state.authenticated = True
                 st.session_state.username = username
                 st.session_state.role = USERS[username]["role"]
                 st.session_state.nom = USERS[username]["nom"]
+                log_audit(username, USERS[username]["role"], "LOGIN", "Connexion réussie")
                 st.rerun()
             else:
                 st.error("❌ Identifiant ou mot de passe incorrect")
@@ -126,7 +179,9 @@ with col_h:
 with col_logout:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚪 Déconnexion", use_container_width=True):
-        st.session_state.authenticated = False
+        for key in ['authenticated','username','role','nom','audit_log',
+                    'worklist_logged','prediction_logged','batch_logged']:
+            st.session_state.pop(key, None)
         st.rerun()
 
 # ─────────────────────────────────────────
@@ -162,6 +217,10 @@ def load_model():
 @st.cache_data
 def load_data():
     return pd.read_csv("data/sihaiq_synthetic_baf.csv")
+
+@st.cache_resource
+def get_explainer(_model):
+    return shap.TreeExplainer(_model)
 
 model, feature_names = load_model()
 df = load_data()
@@ -264,28 +323,26 @@ if tab1 is not None:
             days_since_service = st.slider("Jours depuis Prestation", 0, 90, 15)
 
         if st.button("🔍 Analyser le Dossier", type="primary", use_container_width=True):
-            input_data = np.array([[
-                payer, service_type, ngap_code, num_acts, patient_age,
-                int(is_ald), int(is_ayant_droit), int(inpe_present),
-                int(immatriculation_valid), int(cin_valid), int(ngap_coding_valid),
-                int(prescription_legible), int(droits_active),
-                docs_completeness_ratio, days_since_service,
-                int(pec_required), int(pec_obtained)
-            ]])
-            input_df = pd.DataFrame(input_data, columns=feature_names)
-            prob = model.predict_proba(input_df)[0][1]
-            risk_pct = prob * 100
+            with st.spinner("Analyse en cours…"):
+                input_data = np.array([[
+                    payer, service_type, ngap_code, num_acts, patient_age,
+                    int(is_ald), int(is_ayant_droit), int(inpe_present),
+                    int(immatriculation_valid), int(cin_valid), int(ngap_coding_valid),
+                    int(prescription_legible), int(droits_active),
+                    docs_completeness_ratio, days_since_service,
+                    int(pec_required), int(pec_obtained)
+                ]])
+                input_df = pd.DataFrame(input_data, columns=feature_names)
+                prob = model.predict_proba(input_df)[0][1]
+                risk_pct = prob * 100
 
-            # Log prediction to audit
-            if 'audit_log' not in st.session_state:
-                st.session_state.audit_log = []
-            st.session_state.audit_log.append({
-                "horodatage": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "user": st.session_state.username,
-                "role": role,
-                "action": "PREDICTION",
-                "detail": f"Dossier analysé — Score risque: {risk_pct:.1f}%"
-            })
+                # Log prediction to audit (guarded against re-render)
+                if 'audit_log' not in st.session_state:
+                    st.session_state.audit_log = []
+                if not st.session_state.get('prediction_logged'):
+                    log_audit(st.session_state.username, role, "PREDICTION",
+                              f"Dossier analysé — Score risque: {risk_pct:.1f}%")
+                    st.session_state.prediction_logged = True
 
             st.markdown("---")
             st.markdown("## 📊 Résultat de l'Analyse")
@@ -311,7 +368,7 @@ if tab1 is not None:
                 """, unsafe_allow_html=True)
 
             with col_detail:
-                explainer = shap.TreeExplainer(model)
+                explainer = get_explainer(model)
                 shap_values = explainer.shap_values(input_df)
                 shap_series = pd.Series(shap_values[0], index=feature_names)
                 top_positive = shap_series.nlargest(3)
@@ -354,7 +411,8 @@ if tab1 is not None:
 
             st.markdown("---")
             st.markdown("#### 📉 Explication SHAP Détaillée")
-            fig, ax = plt.subplots(figsize=(10, 4))
+            explainer = get_explainer(model)
+            shap_values = explainer.shap_values(input_df)
             shap.waterfall_plot(
                 shap.Explanation(
                     values=shap_values[0],
@@ -362,6 +420,7 @@ if tab1 is not None:
                     data=input_df.iloc[0],
                     feature_names=feature_names
                 ), show=False)
+            fig = plt.gcf()
             st.pyplot(fig)
             plt.close()
 
@@ -498,14 +557,18 @@ if tab3 is not None:
 
         X = df_model[feature_names]
         y = df_model['rejected']
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:,1]
+        @st.cache_data
+        def compute_model_metrics(_model, _X, _y):
+            X_train, X_test, y_train, y_test = train_test_split(_X, _y, test_size=0.2, random_state=42)
+            y_pred = _model.predict(X_test)
+            y_prob = _model.predict_proba(X_test)[:,1]
+            fpr, tpr, _ = roc_curve(y_test, y_prob)
+            roc_auc = auc(fpr, tpr)
+            cm = confusion_matrix(y_test, y_pred)
+            report = classification_report(y_test, y_pred, output_dict=True)
+            return X_test, y_test, y_pred, y_prob, fpr, tpr, roc_auc, cm, report
 
-        fpr, tpr, _ = roc_curve(y_test, y_prob)
-        roc_auc = auc(fpr, tpr)
-        cm = confusion_matrix(y_test, y_pred)
-        report = classification_report(y_test, y_pred, output_dict=True)
+        X_test, y_test, y_pred, y_prob, fpr, tpr, roc_auc, cm, report = compute_model_metrics(model, X, y)
 
         st.markdown("### 🏆 Scorecard du Modèle")
         c1,c2,c3,c4,c5 = st.columns(5)
@@ -758,11 +821,7 @@ if tab5 is not None:
                 for col, mapping in binary_maps.items():
                     if col in df_scoring.columns:
                         df_scoring[col] = df_scoring[col].map(mapping).fillna(df_scoring[col])
-                # Colonnes manquantes → valeur par défaut 0
-                for col in feature_names:
-                    if col not in df_scoring.columns:
-                       df_scoring[col] = 0
-                df_scoring[feature_names] = df_scoring[feature_names].apply(pd.to_numeric, errors='coerce').fillna(0).astype(float)
+
                 probs = model.predict_proba(df_scoring[feature_names])[:,1]
                 predictions = model.predict(df_scoring[feature_names])
 
@@ -809,16 +868,13 @@ if tab5 is not None:
                     file_name="sihaiq_resultats.csv",
                     mime="text/csv", type="primary")
 
-                # Log batch scoring to audit
+                # Log batch scoring to audit (guarded)
                 if 'audit_log' not in st.session_state:
                     st.session_state.audit_log = []
-                st.session_state.audit_log.append({
-                    "horodatage": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "user": st.session_state.username,
-                    "role": role,
-                    "action": "BATCH_SCORING",
-                    "detail": f"{len(df_input)} dossiers scorés — {high} à risque élevé"
-                })
+                if not st.session_state.get('batch_logged'):
+                    log_audit(st.session_state.username, role, "BATCH_SCORING",
+                              f"{len(df_input)} dossiers scorés — {high} à risque élevé")
+                    st.session_state.batch_logged = True
 
             except Exception as e:
                 st.error(f"❌ Erreur: {str(e)}")
@@ -894,8 +950,11 @@ if tab7 is not None:
         }
 
         # Get top SHAP action per claim
-        explainer_wl = shap.TreeExplainer(model)
-        shap_vals = explainer_wl.shap_values(X_all)
+        @st.cache_data
+        def compute_worklist_shap(_model, _X_all):
+            return shap.TreeExplainer(_model).shap_values(_X_all)
+
+        shap_vals = compute_worklist_shap(model, X_all)
         shap_df = pd.DataFrame(shap_vals, columns=feature_names)
         top_feature = shap_df.idxmax(axis=1)
         top_action = top_feature.map(
@@ -1024,16 +1083,13 @@ if tab7 is not None:
             type="primary"
         )
 
-        # Log to audit
+        # Log to audit (guarded)
         if 'audit_log' not in st.session_state:
             st.session_state.audit_log = []
-        st.session_state.audit_log.append({
-            "horodatage": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "user": st.session_state.username,
-            "role": role,
-            "action": "WORKLIST_VIEW",
-            "detail": f"File de travail consultée — {len(worklist)} dossiers"
-        })
+        if not st.session_state.get('worklist_logged'):
+            log_audit(st.session_state.username, role, "WORKLIST_VIEW",
+                      f"File de travail consultée — {len(worklist)} dossiers")
+            st.session_state.worklist_logged = True
 
 # ─────────────────────────────────────────
 # TAB 8 — DIRECTION FINANCIÈRE
@@ -1318,37 +1374,12 @@ if tab6 is not None:
     with tab6:
         st.markdown("### 📜 Journal d'Audit — Traçabilité des Actions")
 
-        if 'audit_log' not in st.session_state:
-            st.session_state.audit_log = []
+        if st.button("📝 Enregistrer une action manuelle"):
+            log_audit(st.session_state.username, role, "CONSULTATION",
+                      "Consultation du journal d'audit")
 
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # Auto-log login
-        if not any(e['action'] == 'LOGIN' and e['user'] == st.session_state.username
-                   for e in st.session_state.audit_log):
-            st.session_state.audit_log.append({
-                "horodatage": now,
-                "user": st.session_state.username,
-                "role": role,
-                "action": "LOGIN",
-                "detail": "Connexion réussie à la plateforme SihaIQ"
-            })
-
-        col_add, _ = st.columns([2, 3])
-        with col_add:
-            if st.button("📝 Enregistrer une action manuelle"):
-                st.session_state.audit_log.append({
-                    "horodatage": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "user": st.session_state.username,
-                    "role": role,
-                    "action": "CONSULTATION",
-                    "detail": "Consultation du journal d'audit"
-                })
-
-        if st.session_state.audit_log:
-            audit_df = pd.DataFrame(st.session_state.audit_log)
-            audit_df = audit_df.sort_values("horodatage", ascending=False)
-
+        audit_df = get_audit_log()
+        if not audit_df.empty:
             st.dataframe(
                 audit_df,
                 use_container_width=True,
@@ -1361,7 +1392,6 @@ if tab6 is not None:
                     "detail": "📝 Détail"
                 }
             )
-
             audit_buf = io.StringIO()
             audit_df.to_csv(audit_buf, index=False)
             st.download_button(
@@ -1371,7 +1401,7 @@ if tab6 is not None:
                 mime="text/csv"
             )
         else:
-            st.info("Aucune action enregistrée dans cette session.")
+            st.info("Aucune action enregistrée.")
 
         st.markdown("""
             <div style='background:#fff3cd; padding:15px; border-radius:8px;
